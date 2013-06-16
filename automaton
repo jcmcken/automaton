@@ -1,0 +1,48 @@
+#!/bin/bash
+
+function abort() {
+  echo " error: ${1:-unknown error}" && exit 1
+}
+
+function check_if_installed() {
+  ! which $1 &> /dev/null && abort "could not locate '$1', is it installed?"
+}
+
+function create_hiera_config() {
+  cat << EOF
+---
+:backends:
+  - yaml
+:yaml:
+  :datadir: $1
+:hierarchy: common
+EOF
+}
+
+function main() {
+  for i in jgen puppet hiera; do
+    check_if_installed $i
+  done
+
+  TMPDIR=$(mktemp -d)
+  HIERADATADIR=$TMPDIR/data
+  HIERACONFIG=$TMPDIR/hiera.yaml
+  HIERADATAFILE=$HIERADATA/common.yml
+  trap "rm -rf $TMPDIR" exit
+
+  PUPPET_CLASS=$1 && shift
+  DATA_ARGS=$@
+
+  [ -z "$PUPPET_CLASS" ] && abort "must supply a puppet class to run"
+
+  jgen $DATA_ARGS --prefix "$PUPPET_CLASS::" --pretty-print \
+      --yaml >> $HIERADATAFILE
+
+  create_hiera_config $HIERADATADIR > $HIERACONFIG
+
+  puppet --hiera_config $HIERACONFIG apply -e "include $PUPPET_CLASS"
+
+  exit $?
+}
+
+main
