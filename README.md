@@ -32,3 +32,20 @@ bootstrap::puppetmaster::ca_server: foo.bar.com
 
 * Executes a ``puppet apply``, relying on Puppet 3's automatic Hiera lookup for parameterized classes, 
   against the generated Hiera data.
+
+## Why?
+
+Because running stuff like this...
+
+```bash
+[jcmcken@localhost]$ cat << EOF | puppet apply
+class {'bootstrap::puppetmaster':
+  ca        => false,
+  ca_server => 'foo.bar.com',
+}
+EOF
+```
+
+...is annoying.
+
+I wanted a simple, easy way to pass parameters to a parameterized class via ``puppet apply``.
