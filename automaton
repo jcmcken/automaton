@@ -1,5 +1,29 @@
 #!/bin/bash
 
+CONFIG=${AUTOMATON_CONFIG:-/etc/sysconfig/automaton}
+MODULEPATH=${AUTOMATON_MODULEPATH:-/etc/puppet/modules}
+
+if [ $(id -u) -eq 0 ]; then
+  LOG_FILE=/var/log/automaton.log
+else
+  mkdir -p ~/.automaton
+  LOG_FILE=~/.automaton/automaton.log
+fi
+
+[ -f $CONFIG ] && . $CONFIG
+
+[ "$SHELL_DEBUG" == 'true' ] && set -x
+
+function usage() {
+  cat << EOF
+usage: automaton <puppet_class> [parameters ...]
+EOF
+}
+
+function log() {
+  echo "[$(date)] automaton: $1"
+}
+
 function abort() {
   echo " error: ${1:-unknown error}" && exit 1
 }
@@ -27,22 +51,39 @@ function main() {
   TMPDIR=$(mktemp -d)
   HIERADATADIR=$TMPDIR/data
   HIERACONFIG=$TMPDIR/hiera.yaml
-  HIERADATAFILE=$HIERADATA/common.yml
+  HIERADATAFILE=$HIERADATADIR/common.yml
   trap "rm -rf $TMPDIR" exit
+  mkdir -p $HIERADATADIR
 
   PUPPET_CLASS=$1 && shift
   DATA_ARGS=$@
 
   [ -z "$PUPPET_CLASS" ] && abort "must supply a puppet class to run"
 
+  [ -n "$LOG_FILE" ] && exec 3>&1 4>&2 >> $LOG_FILE 2>&1
+
+  log 'info: generating hiera datafile'
   jgen $DATA_ARGS --prefix "$PUPPET_CLASS::" --pretty-print \
       --yaml >> $HIERADATAFILE
 
+  log 'info: generating hiera configuration'
   create_hiera_config $HIERADATADIR > $HIERACONFIG
 
-  puppet --hiera_config $HIERACONFIG apply -e "include $PUPPET_CLASS"
+  log "info: apply puppet modules"
+  log "info: class is '$PUPPET_CLASS'"
+  log "info: modulepath is '$MODULEPATH'"
+  log "info: options are '$PUPPET_OPTS'"
+  puppet apply --detailed-exitcodes --hiera_config $HIERACONFIG \
+      --modulepath $MODULEPATH $PUPPET_OPTS -e "include $PUPPET_CLASS"
+  RET=$?
+  log "info: finished puppet run"
 
-  exit $?
+  [ -n "$LOG_FILE" ] && exec 1>&3 2>&4
+
+  [ $RET -eq 0 ] || [ $RET -eq 2 ] && exit 0
+
+  [ $RET -eq 4 ] || [ $RET -eq 6 ] && \
+    echo 'automaton: error: failed to apply modules!' >&2  && exit 1
 }
 
-main
+main $@
